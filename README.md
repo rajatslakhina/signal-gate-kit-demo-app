@@ -76,12 +76,15 @@ Requires Xcode 16+ and iOS 17+.
 
 ## Verification
 
-See the [Actions tab](https://github.com/rajatslakhina/signal-gate-kit-demo-app/actions) for what actually ran. One job on `macos-15` with Xcode 16, in two meaningful steps — both of which have run and passed:
+See the [Actions tab](https://github.com/rajatslakhina/signal-gate-kit-demo-app/actions) for what actually ran. One job on `macos-15`, in three steps — all of which have run and passed:
 
 1. **`xcodebuild -resolvePackageDependencies`** — proves the remote package genuinely resolves from GitHub. This is the step that fails if the tag is wrong, the repo is private, or the dependency is secretly a stale local path.
-2. **`xcodebuild build -destination 'generic/platform=iOS Simulator'`** — compiles the app against the resolved package for iOS.
+2. **A destination probe** — iterates the installed Xcodes and selects the first whose `-showdestinations` actually lists an iOS Simulator destination for this scheme, downloading the iOS platform only if none does.
+3. **`xcodebuild build -destination 'generic/platform=iOS Simulator'`** — compiles the app against the resolved package for iOS.
 
-`generic/platform=iOS Simulator` rather than a named device is intentional. Pinning to something like `name=iPhone 16,OS=latest` ties the job to whichever simulator *runtimes* are installed on that day's runner image, which is not guaranteed — a compile-only check needs no device to exist.
+Step 2 exists because of a real failure, and the story is worth the four lines. The job originally hardcoded `/Applications/Xcode_16.app` and went red on a commit that changed only `.gitignore`, with `iOS 18.0 is not installed`. The obvious fix — probe `xcodebuild -showsdks` for `iphonesimulator` — **also failed, identically**, because under Xcode 16's split platform model the SDK ships with Xcode while the platform is a separate download. The SDK was there; the platform was not. Probing the thing you actually need, rather than a proxy for it, is what fixed it.
+
+`generic/platform=iOS Simulator` rather than a named device is intentional for the same family of reasons. Pinning to something like `name=iPhone 16,OS=latest` would additionally tie the job to whichever simulator *runtimes* are installed on that day's runner image — a compile-only check needs no device to exist, though as above it does still need the platform.
 
 This CI job is the cheapest honest substitute for a human opening the project, and on a run where the Simulator step is blocked it is the only real evidence the project works at all. It is not a substitute for launching the app, and it does not exercise a single line of UI behaviour.
 
