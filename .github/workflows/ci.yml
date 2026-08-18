@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: iOS Simulator · resolve + build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      # Proves the remote package genuinely resolves from GitHub at the pinned
+      # version. This is the step that would fail if the tag were wrong, the
+      # repo private, or the dependency a stale local path.
+      - name: Resolve package dependencies
+        run: xcodebuild -resolvePackageDependencies -project Demo.xcodeproj -scheme Demo
+
+      - name: Show resolved version
+        run: |
+          if [ -f Demo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved ]; then
+            cat Demo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          else
+            echo "No Package.resolved committed; resolution happened fresh from the tag."
+          fi
+
+      # `generic/platform=iOS Simulator` on purpose — never a named device.
+      # Pinning to `name=iPhone 16,OS=latest` ties the job to whichever
+      # simulator *runtimes* happen to be installed on that day's runner image,
+      # and they are not guaranteed. A compile-only check needs no device to
+      # exist.
+      - name: Build for iOS Simulator
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Demo.xcodeproj \
+            -scheme Demo \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty || xcodebuild build \
+                -project Demo.xcodeproj \
+                -scheme Demo \
+                -destination 'generic/platform=iOS Simulator' \
+                CODE_SIGNING_ALLOWED=NO
