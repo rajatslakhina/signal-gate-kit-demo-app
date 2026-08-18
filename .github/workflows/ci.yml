@@ -18,39 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Select an Xcode that actually has an iOS simulator SDK installed,
-      # rather than hardcoding one.
-      #
-      # This is not defensive boilerplate — it is a fix for a real failure.
-      # Hardcoding `/Applications/Xcode_16.app` produced:
-      #
-      #     xcodebuild: error: Unable to find a destination matching the
-      #     provided destination specifier: { generic:1, platform:iOS Simulator }
-      #     Ineligible destinations for the "Demo" scheme:
-      #       { platform:iOS, ..., error:iOS 18.0 is not installed. }
-      #
-      # on a commit that changed only `.gitignore`, while two earlier runs of
-      # the identical workflow passed. `generic/platform=iOS Simulator` avoids
-      # depending on a specific simulator *device* — but it still needs the iOS
-      # *platform* to be present in the selected Xcode, and which Xcode installs
-      # carry it varies across hosted runner images. Probing is the only thing
-      # that does not depend on that lottery.
-      - name: Select an Xcode with an iOS SDK
-        run: |
-          set -euo pipefail
-          for app in /Applications/Xcode_16*.app /Applications/Xcode.app /Applications/Xcode_*.app; do
-            [ -d "$app" ] || continue
-            if DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -showsdks 2>/dev/null | grep -q 'iphonesimulator'; then
-              sudo xcode-select -s "$app"
-              echo "Selected $app"
-              xcodebuild -version
-              xcodebuild -showsdks | grep -i 'ios' || true
-              exit 0
-            fi
-          done
-          echo "::error::No Xcode on this runner has an iOS simulator SDK installed." >&2
-          exit 1
-
       # Proves the remote package genuinely resolves from GitHub at the pinned
       # version. This is the step that would fail if the tag were wrong, the
       # repo private, or the dependency a stale local path.
@@ -59,17 +26,58 @@ jobs:
 
       - name: Show resolved version
         run: |
-          if [ -f Demo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved ]; then
-            cat Demo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          else
-            echo "No Package.resolved committed; resolution happened fresh from the tag."
-          fi
+          F=Demo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          if [ -f "$F" ]; then cat "$F"; else echo "Resolved fresh from the version requirement (no Package.resolved committed)."; fi
+
+      # Find an Xcode that can actually produce an iOS Simulator destination.
+      #
+      # This is a fix for a real, reproduced failure, and the first attempt at
+      # fixing it was wrong in an instructive way. Hardcoding
+      # `/Applications/Xcode_16.app` produced:
+      #
+      #     xcodebuild: error: Unable to find a destination matching the
+      #     provided destination specifier: { generic:1, platform:iOS Simulator }
+      #     Ineligible destinations: { platform:iOS, ...,
+      #       error:iOS 18.0 is not installed. }
+      #
+      # The obvious fix — probe `xcodebuild -showsdks` for `iphonesimulator` —
+      # did NOT work, because under Xcode 16's split platform model the *SDK*
+      # ships with Xcode while the *platform* is a separate download. The SDK
+      # was present; the platform was not; the probe passed and the build failed
+      # identically.
+      #
+      # So probe the thing that actually matters: whether `-showdestinations`
+      # lists an iOS Simulator destination for this scheme. If no installed
+      # Xcode offers one, download the platform rather than failing.
+      - name: Ensure an iOS Simulator destination exists
+        run: |
+          set -uo pipefail
+          pick() {
+            for app in /Applications/Xcode_16*.app /Applications/Xcode.app /Applications/Xcode_*.app; do
+              [ -d "$app" ] || continue
+              if DEVELOPER_DIR="$app/Contents/Developer" xcodebuild \
+                   -project Demo.xcodeproj -scheme Demo -showdestinations 2>/dev/null \
+                   | grep -q 'platform:iOS Simulator'; then
+                sudo xcode-select -s "$app"
+                echo "Selected $app"
+                return 0
+              fi
+            done
+            return 1
+          }
+          if pick; then xcodebuild -version; exit 0; fi
+          echo "No installed Xcode offers an iOS Simulator destination; downloading the iOS platform."
+          sudo xcodebuild -downloadPlatform iOS || true
+          if pick; then xcodebuild -version; exit 0; fi
+          echo "::error::Could not obtain an iOS Simulator destination on this runner."
+          xcodebuild -project Demo.xcodeproj -scheme Demo -showdestinations || true
+          exit 1
 
       # `generic/platform=iOS Simulator` on purpose — never a named device.
-      # Pinning to `name=iPhone 16,OS=latest` ties the job to whichever
-      # simulator *runtimes* happen to be installed on that day's runner image,
-      # and they are not guaranteed. A compile-only check needs no device to
-      # exist.
+      # Pinning to `name=iPhone 16,OS=latest` would additionally tie the job to
+      # whichever simulator *runtimes* are installed on that day's runner image.
+      # A compile-only check needs no device to exist — but, as the step above
+      # documents, it does still need the iOS platform.
       - name: Build for iOS Simulator
         run: |
           set -o pipefail
@@ -77,9 +85,4 @@ jobs:
             -project Demo.xcodeproj \
             -scheme Demo \
             -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            | xcpretty || xcodebuild build \
-                -project Demo.xcodeproj \
-                -scheme Demo \
-                -destination 'generic/platform=iOS Simulator' \
-                CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO
