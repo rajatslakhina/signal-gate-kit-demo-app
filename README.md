@@ -76,7 +76,7 @@ Requires Xcode 16+ and iOS 17+.
 
 ## Verification
 
-See the [Actions tab](https://github.com/rajatslakhina/signal-gate-kit-demo-app/actions) for what actually ran. One job on `macos-15`, in three steps — all of which have run and passed:
+See the [Actions tab](https://github.com/rajatslakhina/signal-gate-kit-demo-app/actions) for what actually ran. One job on `macos-15`; past checkout, three steps do the real work, and all have run and passed:
 
 1. **`xcodebuild -resolvePackageDependencies`** — proves the remote package genuinely resolves from GitHub. This is the step that fails if the tag is wrong, the repo is private, or the dependency is secretly a stale local path.
 2. **A destination probe** — iterates the installed Xcodes and selects the first whose `-showdestinations` actually lists an iOS Simulator destination for this scheme, downloading the iOS platform only if none does.
@@ -88,7 +88,7 @@ Step 2 exists because of a real failure, and the story is worth the four lines. 
 
 This CI job is the cheapest honest substitute for a human opening the project, and on a run where the Simulator step is blocked it is the only real evidence the project works at all. It is not a substitute for launching the app, and it does not exercise a single line of UI behaviour.
 
-The library itself carries **108 XCTest tests**, green on both Linux and macOS, including sweeps across all 499 reachable slider positions that pin the scenario behaviour this app depends on — see [signal-gate-kit](https://github.com/rajatslakhina/signal-gate-kit).
+The library itself carries **112 XCTest tests**, green on both Linux and macOS, including sweeps across all 499 reachable slider positions that pin the scenario behaviour this app depends on — see [signal-gate-kit](https://github.com/rajatslakhina/signal-gate-kit).
 
 ## License
 
