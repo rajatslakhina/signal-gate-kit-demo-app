@@ -18,8 +18,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app
+      # Select an Xcode that actually has an iOS simulator SDK installed,
+      # rather than hardcoding one.
+      #
+      # This is not defensive boilerplate — it is a fix for a real failure.
+      # Hardcoding `/Applications/Xcode_16.app` produced:
+      #
+      #     xcodebuild: error: Unable to find a destination matching the
+      #     provided destination specifier: { generic:1, platform:iOS Simulator }
+      #     Ineligible destinations for the "Demo" scheme:
+      #       { platform:iOS, ..., error:iOS 18.0 is not installed. }
+      #
+      # on a commit that changed only `.gitignore`, while two earlier runs of
+      # the identical workflow passed. `generic/platform=iOS Simulator` avoids
+      # depending on a specific simulator *device* — but it still needs the iOS
+      # *platform* to be present in the selected Xcode, and which Xcode installs
+      # carry it varies across hosted runner images. Probing is the only thing
+      # that does not depend on that lottery.
+      - name: Select an Xcode with an iOS SDK
+        run: |
+          set -euo pipefail
+          for app in /Applications/Xcode_16*.app /Applications/Xcode.app /Applications/Xcode_*.app; do
+            [ -d "$app" ] || continue
+            if DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -showsdks 2>/dev/null | grep -q 'iphonesimulator'; then
+              sudo xcode-select -s "$app"
+              echo "Selected $app"
+              xcodebuild -version
+              xcodebuild -showsdks | grep -i 'ios' || true
+              exit 0
+            fi
+          done
+          echo "::error::No Xcode on this runner has an iOS simulator SDK installed." >&2
+          exit 1
 
       # Proves the remote package genuinely resolves from GitHub at the pinned
       # version. This is the step that would fail if the tag were wrong, the
